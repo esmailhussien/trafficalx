@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html class="dark" dir="rtl" lang="ar">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>تسجيل الدخول | مركز إدارة المرور</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: { "primary": "#0ea5e9", "dark-bg": "#0f172a" },
+                    fontFamily: { "sans": ["Cairo", "sans-serif"] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #0f172a; }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        .input-field {
+            background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white; transition: all 0.3s;
+        }
+        .input-field:focus { border-color: #0ea5e9; outline: none; box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2); }
+    </style>
+</head>
+<body class="h-screen w-full flex items-center justify-center relative overflow-hidden">
+    
+    <div class="absolute inset-0 z-0">
+        <div class="absolute top-0 left-0 w-full h-full bg-[url('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=2613&auto=format&fit=crop')] bg-cover bg-center opacity-30"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-dark-bg via-dark-bg/80 to-dark-bg/60"></div>
+    </div>
+
+    <div class="glass-panel p-8 rounded-2xl w-full max-w-sm z-10 border-t-4 border-primary">
+        <div class="text-center mb-6">
+            <div class="size-14 bg-primary/20 rounded-xl flex items-center justify-center text-primary mx-auto mb-3 border border-primary/30">
+                <span class="material-symbols-outlined text-3xl">shield_lock</span>
+            </div>
+            <h1 class="text-2xl font-bold text-white">تسجيل دخول آمن</h1>
+            <p class="text-white/40 text-xs mt-1">نظام مرور الإسكندرية الذكي</p>
+        </div>
+
+        <form onsubmit="handleLogin(event)" class="space-y-4">
+            <div>
+                <label class="text-xs text-white/70 font-bold block mb-1 mr-1">المستخدم</label>
+                <input type="text" id="username" class="input-field w-full rounded-lg py-2 px-3 text-sm text-center" placeholder="username" required>
+            </div>
+            
+            <div>
+                <label class="text-xs text-white/70 font-bold block mb-1 mr-1">كلمة المرور</label>
+                <input type="password" id="password" class="input-field w-full rounded-lg py-2 px-3 text-sm text-center" placeholder="••••••" required>
+            </div>
+
+            <p id="error-msg" class="text-red-400 text-xs font-bold text-center h-4 opacity-0 transition-opacity">بيانات غير صحيحة</p>
+
+            <button type="submit" id="loginBtn" class="w-full bg-primary hover:bg-sky-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
+                <span>دخول</span>
+            </button>
+        </form>
+    </div>
+
+    <script>
+        // رابط الوركر الخاص بك (نفس المستخدم في الخريطة)
+        const WORKER_URL = "https://trafficdata.olivesom3a.workers.dev/";
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const btn = document.getElementById('loginBtn');
+            const errorMsg = document.getElementById('error-msg');
+
+            // 1. تغيير حالة الزر (Loading)
+            btn.innerHTML = '<span class="animate-spin material-symbols-outlined text-sm">sync</span> جاري التحقق...';
+            btn.classList.add('opacity-70', 'cursor-not-allowed');
+            errorMsg.classList.add('opacity-0');
+
+            try {
+                // 2. إرسال الطلب إلى Cloudflare Worker
+                const response = await fetch(WORKER_URL + '?type=login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // 3. نجاح الدخول
+                    sessionStorage.setItem('isLoggedIn', 'true');
+                    sessionStorage.setItem('authToken', data.token); // تخزين التوكن للمستقبل
+                    
+                    btn.innerHTML = '<span class="material-symbols-outlined">check</span> تم بنجاح';
+                    btn.classList.replace('bg-primary', 'bg-green-500');
+                    
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 500);
+                } else {
+                    throw new Error('Invalid credentials');
+                }
+
+            } catch (err) {
+                // 4. فشل الدخول
+                btn.innerHTML = 'دخول';
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+                errorMsg.classList.remove('opacity-0');
+                
+                // اهتزاز النموذج
+                document.querySelector('.glass-panel').animate([
+                    { transform: 'translateX(0)' }, { transform: 'translateX(-5px)' }, 
+                    { transform: 'translateX(5px)' }, { transform: 'translateX(0)' }
+                ], { duration: 300 });
+            }
+        }
+    </script>
+</body>
+</html>

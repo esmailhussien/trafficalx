@@ -1,0 +1,402 @@
+<script>
+    // 1. التحقق من وجود "ختم الدخول"
+    const isLoggedIn = sessionStorage.getItem('isLoggedIn');
+
+    // 2. إذا لم يكن مسجلاً، اطرده فوراً لصفحة الدخول
+    if (!isLoggedIn) {
+        // نستخدم replace بدلاً من href لمنع المستخدم من الضغط على زر "رجوع" للعودة للخريطة
+        window.location.replace("login.html"); 
+    }
+</script>
+
+<!DOCTYPE html>
+<html class="dark" dir="rtl" lang="ar">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>مركز إدارة المرور | V30.0 Real Data</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0ea5e9", 
+                        "dark-panel": "#1e293b", 
+                        "darker-panel": "#0f172a",
+                        "success": "#10b981",
+                        "warning": "#f59e0b",
+                        "danger": "#ef4444",
+                        "hotspot": "#be123c"
+                    },
+                    fontFamily: { "sans": ["Cairo", "sans-serif"] }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { font-family: 'Cairo', sans-serif; overflow: hidden; }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            color: white;
+            border-radius: 16px;
+        }
+        #map { width: 100%; height: 100%; background: #e2e8f0; z-index: 0; }
+        .leaflet-popup-content-wrapper {
+            background: #1e293b; color: white; border: 1px solid #334155; 
+            border-radius: 8px; font-family: 'Cairo'; text-align: right;
+        }
+        .leaflet-popup-tip { background: #1e293b; }
+        .leaflet-container a.leaflet-popup-close-button { color: #94a3b8; }
+        
+        .pulse-marker {
+            width: 24px; height: 24px; border-radius: 50%; border: 2px solid white;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); animation: pulse-red 2s infinite;
+            display: flex; justify-content: center; align-items: center; color: white;
+        }
+        .hotspot-icon {
+            background: #be123c; border: 2px solid white; color: white;
+            border-radius: 50%; width: 20px; height: 20px;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 4px 10px rgba(190, 18, 60, 0.5);
+        }
+        .signal-icon {
+            background: #0f172a; border: 2px solid #3b82f6; color: #3b82f6;
+            border-radius: 6px; width: 18px; height: 18px;
+            display: flex; justify-content: center; align-items: center;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .active-tool { background: rgba(56, 189, 248, 0.15) !important; color: #38bdf8 !important; border-right: 3px solid #38bdf8; }
+        .alert-item { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; cursor: pointer; border-radius: 8px; margin-bottom: 4px; background: rgba(255,255,255,0.02); }
+        .alert-item:hover { background: rgba(255,255,255,0.08); }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    </style>
+</head>
+
+<body class="h-screen flex flex-col bg-gray-100">
+
+    <header class="flex items-center justify-between border-b border-white/10 bg-dark-panel text-white px-6 py-3 z-50 shadow-md">
+        <div class="flex items-center gap-3">
+            <div class="size-10 bg-primary/20 rounded-lg flex items-center justify-center text-primary border border-primary/30 shadow-lg">
+                <span class="material-symbols-outlined">traffic</span>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight">مرور الإسكندرية</h1>
+                <span class="text-[10px] text-white/50 tracking-widest font-bold uppercase">البيانات الحية</span>
+            </div>
+        </div>
+        <div class="relative group hidden md:block">
+            <span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-lg">search</span>
+            <input id="searchInput" class="bg-darker-panel border border-white/10 rounded-lg pr-10 pl-4 py-2 text-sm focus:outline-none focus:border-primary w-96 transition-all text-white placeholder-white/30" placeholder="بحث عن موقع..." onkeypress="handleSearch(event)"/>
+        </div>
+        <div class="flex items-center gap-2 bg-darker-panel px-3 py-1.5 rounded-full border border-white/5">
+            <span class="text-xs font-bold text-success flex items-center gap-2"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span></span> متصل</span>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative">
+        <aside class="w-16 md:w-20 bg-dark-panel border-l border-white/5 flex flex-col items-center py-6 gap-4 z-40 shadow-2xl text-white">
+            <button onclick="toggleLayer('flow', this)" class="p-3 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-all active-tool" title="السيولة"><span class="material-symbols-outlined">waves</span></button>
+            <button onclick="toggleLayer('incidents', this)" class="p-3 rounded-xl text-white/50 hover:text-warning hover:bg-white/5 transition-all active-tool" title="الحوادث"><span class="material-symbols-outlined">warning</span></button>
+            <button onclick="toggleLayer('signals', this)" class="p-3 rounded-xl text-white/50 hover:text-primary hover:bg-white/5 transition-all" title="الإشارات"><span class="material-symbols-outlined">traffic</span></button>
+            <button onclick="toggleLayer('hotspots', this)" class="p-3 rounded-xl text-white/50 hover:text-hotspot hover:bg-white/5 transition-all active-tool" title="النقاط الساخنة"><span class="material-symbols-outlined">water_drop</span></button>
+            <div class="w-10 h-px bg-white/10 my-2"></div>
+            <button onclick="toggleScenarioPanel(this)" class="p-3 rounded-xl text-white/50 hover:text-success hover:bg-white/5 transition-all" title="المحاكي"><span class="material-symbols-outlined">alt_route</span></button>
+        </aside>
+
+        <main class="flex-1 relative">
+            <div id="map"></div>
+
+            <div class="absolute top-6 right-6 flex gap-4 z-10 pointer-events-none">
+                <div class="glass-panel p-4 rounded-xl min-w-[160px] pointer-events-auto text-center flex flex-col items-center">
+                    <span class="text-[11px] text-white/60 font-bold block mb-1">مؤشر الازدحام</span>
+                    <div class="text-3xl font-bold text-white flex items-center gap-1"><span id="congestion-idx">--%</span> <span class="material-symbols-outlined text-danger text-sm">arrow_upward</span></div>
+                </div>
+                <div class="glass-panel p-4 rounded-xl min-w-[160px] pointer-events-auto text-center flex flex-col items-center">
+                    <span class="text-[11px] text-white/60 font-bold block mb-1">متوسط السرعة</span>
+                    <div class="text-3xl font-bold text-success flex items-center gap-1"><span id="avg-speed">--</span> <span class="text-sm font-normal text-white/50">كم/س</span></div>
+                </div>
+            </div>
+
+            <div class="absolute top-36 right-6 z-10 w-80 glass-panel rounded-xl pointer-events-auto flex flex-col shadow-2xl overflow-hidden border border-white/5">
+                <div class="p-4 border-b border-white/5 flex justify-between items-center bg-darker-panel/50">
+                    <div class="flex items-center gap-2"><span class="material-symbols-outlined text-warning text-sm">notifications_active</span><span class="text-sm font-bold">تنبيهات مباشرة</span></div>
+                    <span class="text-[10px] bg-white/10 px-2 py-0.5 rounded text-white/70 font-mono" id="incidents-count">0</span>
+                </div>
+                <div id="alerts-list" class="overflow-y-auto custom-scroll p-2 space-y-1 bg-dark-panel/30" style="max-height: 240px;">
+                    <div class="text-center text-white/30 text-xs py-8 flex flex-col items-center gap-2"><span class="material-symbols-outlined animate-spin">sync</span>جاري الاتصال...</div>
+                </div>
+            </div>
+
+            <div class="absolute bottom-8 left-8 right-8 z-10">
+                <div class="glass-panel px-4 py-3 rounded-xl flex items-center gap-4 border border-white/5">
+                    <div class="flex items-center gap-2 text-primary"><span class="material-symbols-outlined">history</span></div>
+                    <div class="flex-1 relative h-2 bg-darker-panel rounded-full overflow-hidden">
+                        <div id="timeline-fill" class="h-full bg-primary rounded-full w-full transition-all duration-300"></div>
+                        <input type="range" min="1" max="24" value="24" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" oninput="applyTimeFilter(this.value)">
+                    </div>
+                    <span id="time-display" class="text-xs font-bold text-white whitespace-nowrap min-w-[80px] text-center bg-white/5 px-2 py-1 rounded">مباشر (24h)</span>
+                </div>
+            </div>
+
+            <div id="scenarioPanel" class="absolute top-6 left-6 z-20 w-80 glass-panel rounded-xl p-5 hidden transition-all border border-primary/30 shadow-2xl">
+                <div class="flex justify-between items-center mb-4 border-b border-white/10 pb-2">
+                    <h3 class="text-primary font-bold flex items-center gap-2 text-sm"><span class="material-symbols-outlined">alt_route</span> مخطط المسارات</h3>
+                    <button onclick="toggleScenarioPanel()" class="text-white/50 hover:text-white"><span class="material-symbols-outlined">close</span></button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <button id="btn-start" onclick="setMode('start')" class="sc-btn p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-xs text-center font-bold text-white flex flex-col items-center gap-1"><span class="material-symbols-outlined text-success">location_on</span> البداية</button>
+                    <button id="btn-end" onclick="setMode('end')" class="sc-btn p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-xs text-center font-bold text-white flex flex-col items-center gap-1"><span class="material-symbols-outlined text-primary">flag</span> الوصول</button>
+                </div>
+                <button id="btn-block" onclick="setMode('block')" class="sc-btn w-full p-3 mb-3 rounded-lg border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 text-xs font-bold flex items-center justify-center gap-2"><span class="material-symbols-outlined text-sm">block</span> إغلاق طريق</button>
+                <div id="status-msg" class="text-center text-[10px] text-white/40 bg-black/20 p-2 rounded mb-2 border border-white/5">جاهز..</div>
+                <button onclick="calculateScenario()" class="sc-btn w-full bg-primary hover:bg-sky-400 text-white font-bold py-2.5 rounded-lg text-sm mb-2 shadow-lg">حساب البدائل</button>
+                <button onclick="resetScenario()" class="w-full text-white/40 hover:text-white text-xs text-center py-1">مسح الكل</button>
+                <div id="sc-result" class="mt-3 space-y-2 max-h-40 overflow-y-auto custom-scroll text-white"></div>
+            </div>
+        </main>
+    </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- Configuration ---
+    const WORKER_URL = "https://trafficdata.olivesom3a.workers.dev/"; 
+    const ALEX_CENTER = [31.2001, 29.9187];
+    
+    // Map Init (CartoDB Positron - Light)
+    const map = L.map('map', {zoomControl: false}).setView(ALEX_CENTER, 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', maxZoom: 20 }).addTo(map);
+
+    const layers = {
+        flow: L.layerGroup().addTo(map),
+        incidents: L.layerGroup().addTo(map),
+        routing: L.layerGroup().addTo(map),
+        signals: L.layerGroup(),
+        cameras: L.layerGroup(),
+        hotspots: L.layerGroup().addTo(map) 
+    };
+
+    let globalIncidents = [];
+
+    // --- Data Loaders ---
+    function loadFlow() {
+        const url = `${WORKER_URL}?type=flow_tile&x={x}&y={y}&z={z}`; // Using Worker Proxy
+        layers.flow.clearLayers();
+        L.tileLayer(url, { maxZoom: 22, opacity: 0.8 }).addTo(layers.flow);
+    }
+
+    async function fetchIncidents() {
+        const url = `${WORKER_URL}?type=traffic`;
+        try {
+            const res = await fetch(url).then(r=>r.json());
+            if(res.incidents) { globalIncidents = res.incidents; applyTimeFilter(24); }
+        } catch(e) { console.error("Traffic Error", e); }
+    }
+
+    async function loadSignals() {
+        if(layers.signals.getLayers().length > 0) return;
+        const url = `${WORKER_URL}?type=signals`;
+        try {
+            const data = await fetch(url).then(r => r.json());
+            const features = data.features || data;
+            
+            features.forEach(f => {
+                // Handling GeoJSON [Lon, Lat] -> Leaflet [Lat, Lon]
+                const coords = f.geometry ? f.geometry.coordinates : [0,0];
+                const lat = coords[1];
+                const lng = coords[0];
+                const name = f.properties ? f.properties.name : "إشارة";
+
+                if(lat && lng) {
+                    const icon = L.divIcon({html: `<div class="signal-icon"><span class="material-symbols-outlined text-[10px]">traffic</span></div>`, className: ''});
+                    L.marker([lat, lng], {icon:icon}).bindPopup(`<b class="text-primary">${name || 'إشارة مرورية'}</b>`).addTo(layers.signals);
+                }
+            });
+        } catch(e) { console.error("Signals Error", e); }
+    }
+
+    async function loadHotspots() {
+        if(layers.hotspots.getLayers().length > 0) return;
+        const url = `${WORKER_URL}?type=hotspots`;
+        try {
+            const data = await fetch(url).then(r => r.json());
+            const features = data.features || data;
+
+            features.forEach(f => {
+                const coords = f.geometry ? f.geometry.coordinates : [0,0];
+                const lat = coords[1];
+                const lng = coords[0];
+                // Reading Arabic Properties from your JSON structure
+                const p = f.properties || {};
+                const name = p['اسم_النقطة_الساخنة'] || "تجمع مياه";
+                const solution = p['الحل_المقترح'] || "";
+
+                if(lat && lng) {
+                    const icon = L.divIcon({html: `<div class="hotspot-icon"><span class="material-symbols-outlined text-[12px]">water_drop</span></div>`, className: ''});
+                    const popup = `<div class="text-right"><b class="text-hotspot block mb-1 text-sm">نقطة ساخنة</b><div class="text-sm font-bold text-white mb-1">${name}</div>${solution ? `<div class="text-xs text-white/60 bg-white/5 p-1 rounded">💡 ${solution}</div>` : ''}</div>`;
+                    L.marker([lat, lng], {icon:icon}).bindPopup(popup).addTo(layers.hotspots);
+                }
+            });
+        } catch(e) { console.error("Hotspots Error", e); }
+    }
+
+    // --- UI Logic ---
+    window.applyTimeFilter = (hours) => {
+        document.getElementById('time-display').innerText = `آخر ${hours} ساعة`;
+        document.getElementById('timeline-fill').style.width = (hours/24*100) + '%';
+        layers.incidents.clearLayers();
+        const cutoff = new Date(Date.now() - (hours * 3600000));
+        let count = 0, listHTML = '';
+
+        globalIncidents.forEach(inc => {
+            if(new Date(inc.properties.startTime) < cutoff) return;
+            count++;
+            const p = inc.properties;
+            let col='#0ea5e9', icon='info', lbl='تنبيه', txtCol='text-primary';
+            if(p.iconCategory===1) { col='#ef4444'; icon='car_crash'; lbl='حادث'; txtCol='text-danger'; }
+            else if(p.iconCategory===9) { col='#f59e0b'; icon='construction'; lbl='أعمال'; txtCol='text-warning'; }
+            else if(p.iconCategory===6) { col='#be123c'; icon='block'; lbl='مغلق'; txtCol='text-hotspot'; }
+
+            const popup = `<div class="font-bold text-right"><span style="color:${col}">${lbl}</span><br><span class="text-xs text-white/70">${p.events[0].description}</span></div>`;
+            
+            let latLng;
+            if(inc.geometry.type==='LineString') {
+                latLng = [inc.geometry.coordinates[0][1], inc.geometry.coordinates[0][0]];
+                L.polyline(inc.geometry.coordinates.map(c=>[c[1],c[0]]), {color:col, weight:5, opacity:0.7}).bindPopup(popup).addTo(layers.incidents);
+            } else {
+                latLng = [inc.geometry.coordinates[1],inc.geometry.coordinates[0]];
+            }
+            const marker = L.divIcon({html: `<div class="pulse-marker" style="background:${col}; box-shadow:0 0 10px ${col}40; border-color:white;"><span class="material-symbols-outlined text-[14px]">${icon}</span></div>`, className: ''});
+            L.marker(latLng, {icon:marker}).bindPopup(popup).addTo(layers.incidents);
+
+            listHTML += `<div class="alert-item group" onclick="map.setView([${latLng}], 16)"><div class="flex items-center justify-between mb-1"><span class="text-xs font-bold ${txtCol} flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">${icon}</span> ${lbl}</span><span class="text-[10px] text-white/30 font-mono">${new Date(p.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div><p class="text-[11px] text-white/70 line-clamp-1 font-medium">${p.events[0].description}</p></div>`;
+        });
+
+        document.getElementById('alerts-list').innerHTML = listHTML || '<div class="text-center text-white/30 text-xs py-8">لا توجد تنبيهات</div>';
+        document.getElementById('incidents-count').innerText = count;
+        document.getElementById('congestion-idx').innerText = Math.min(100, Math.round(count * 2.2)) + '%';
+        document.getElementById('avg-speed').innerText = Math.max(10, 65 - Math.round(count/2));
+    };
+
+    // --- Scenario ---
+    let sc = {mode:null,s:null,e:null,blkRect:null,blkBounds:null};
+    window.toggleScenarioPanel = () => { const el=document.getElementById('scenarioPanel'); el.style.display=el.style.display==='block'?'none':'block'; };
+    window.setMode = m => { sc.mode=m; document.getElementById('status-msg').innerText = m==='block'?'اضغط لرسم منطقة الإغلاق':'حدد المكان'; };
+    map.on('click', e => {
+        if(!sc.mode)return;
+        const {lat,lng}=e.latlng;
+        if(sc.mode==='start'){ if(sc.s)map.removeLayer(sc.s); sc.s=L.marker([lat,lng],{icon:L.divIcon({html:'<div class="w-4 h-4 bg-success rounded-full border-2 border-white shadow"></div>',className:''})}).addTo(layers.routing); }
+        else if(sc.mode==='end'){ if(sc.e)map.removeLayer(sc.e); sc.e=L.marker([lat,lng],{icon:L.divIcon({html:'<div class="w-4 h-4 bg-primary rounded-full border-2 border-white shadow"></div>',className:''})}).addTo(layers.routing); }
+        else if(sc.mode==='block'){ const d=0.0002; const b=[[lat-d,lng-d],[lat+d,lng+d]]; if(sc.blkRect)map.removeLayer(sc.blkRect); sc.blkRect=L.rectangle(b,{color:'#ef4444',weight:2,fillOpacity:0.5}).addTo(layers.routing); sc.blkBounds=sc.blkRect.getBounds(); }
+        sc.mode=null; document.getElementById('status-msg').innerText='تم التحديد';
+    });
+
+  window.calculateScenario = async () => {
+        // التحقق من وجود نقاط البداية والنهاية
+        if(!sc.s || !sc.e) return;
+        
+        // إظهار مؤشر التحميل
+        document.getElementById('sc-result').innerHTML = '<div class="text-center text-xs text-primary animate-pulse py-2">جاري حساب المسارات...</div>';
+        
+        // يتم إرسال الإحداثيات كـ Query Parameters للوركر
+        const url = `${WORKER_URL}?type=route&s=${sc.s.getLatLng().lat},${sc.s.getLatLng().lng}&e=${sc.e.getLatLng().lat},${sc.e.getLatLng().lng}`;
+        
+        // 2. إعداد خيارات الطلب (Options)
+        let opts = {
+            method: 'GET' // الافتراضي هو GET للمسارات العادية
+        };
+
+        if(sc.blkBounds) {
+            const ne = sc.blkBounds.getNorthEast();
+            const sw = sc.blkBounds.getSouthWest();
+            opts = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    "avoidAreas": {
+                        "rectangles": [{
+                            "southWestCorner": { "latitude": sw.lat, "longitude": sw.lng },
+                            "northEastCorner": { "latitude": ne.lat, "longitude": ne.lng }
+                        }]
+                    }
+                })
+            };
+        }
+
+        try {
+            const res = await fetch(url, opts).then(r => r.json());
+            
+            layers.routing.eachLayer(l => { 
+                if(l instanceof L.Polyline && !(l instanceof L.Rectangle)) layers.routing.removeLayer(l); 
+            });
+
+            if (res.routes && res.routes.length > 0) {
+                let html = '';
+                const colors = ['#10b981', '#a855f7', '#0ea5e9']; // ألوان المسارات الثلاثة
+                
+                res.routes.forEach((r, i) => {
+                    // رسم الخط على الخريطة
+                    const pts = r.legs[0].points.map(p => [p.latitude, p.longitude]);
+                    L.polyline(pts, {
+                        color: colors[i], 
+                        weight: i===0 ? 6 : 4, // المسار الأول (الأسرع) يكون أسمك
+                        opacity: i===0 ? 0.9 : 0.6
+                    }).addTo(layers.routing);
+                    
+                    const time = Math.round(r.summary.travelTimeInSeconds / 60);
+                    const dist = (r.summary.lengthInMeters / 1000).toFixed(1);
+
+                    html += `
+                    <div class="bg-white/5 border-r-4 p-3 rounded mb-2 text-xs flex justify-between items-center hover:bg-white/10 transition-colors cursor-pointer" style="border-color:${colors[i]}">
+                        <div>
+                            <span class="font-bold text-white block text-sm">مسار ${i+1} ${i===0 ? '(الأسرع)' : ''}</span>
+                            <span class="text-white/50">${dist} كم</span>
+                        </div>
+                        <span class="text-lg font-bold text-primary">${time} د</span>
+                    </div>`;
+                });
+                document.getElementById('sc-result').innerHTML = html;
+            } else {
+                document.getElementById('sc-result').innerHTML = '<div class="text-center text-danger text-xs py-2">عفواً، الطريق مغلق ولا يوجد بديل متاح!</div>';
+            }
+        } catch(e) { 
+            console.error("Routing Error", e); 
+            document.getElementById('sc-result').innerHTML = '<div class="text-center text-warning text-xs py-2">حدث خطأ في الاتصال بالسيرفر</div>';
+        }
+    };
+    window.resetScenario = () => { layers.routing.clearLayers(); sc={mode:null,s:null,e:null,blkRect:null,blkBounds:null}; document.getElementById('sc-result').innerHTML=''; };
+
+    // --- Toggles ---
+    window.toggleLayer = (n,b) => {
+        if(map.hasLayer(layers[n])) { map.removeLayer(layers[n]); if(b) b.classList.remove('active-tool'); }
+        else { map.addLayer(layers[n]); if(b) b.classList.add('active-tool'); if(n==='signals')loadSignals(); if(n==='hotspots')loadHotspots(); }
+    };
+    async function handleSearch(e){
+        if(e.key==='Enter'){
+            const q=document.getElementById('searchInput').value; if(!q)return;
+            const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}+Alexandria+Egypt&limit=1`).then(r=>r.json());
+            if(res.length){ map.setView([res[0].lat,res[0].lon],16); L.popup().setLatLng([res[0].lat,res[0].lon]).setContent(`<div class="text-right text-black font-bold p-1">${res[0].display_name.split(',')[0]}</div>`).openOn(map); }
+        }
+    }
+
+    // Init
+    loadFlow(); fetchIncidents(); setInterval(fetchIncidents, 120000); loadHotspots();
+</script>
+</body>
+</html>
